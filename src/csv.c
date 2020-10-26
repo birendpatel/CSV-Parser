@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <limits.h>
+#include <string.h>
 
 /*******************************************************************************
 local error codes, propagate to API error codes
@@ -104,14 +105,10 @@ struct csv *csv_read(const char * const filename, const bool header, int *error)
     
     //read each datum into a struct csv_cell
     
-    //check all good
-    goto success;
-    
     //error handling   
-    success:
-        fclose(csvfile);
-        *error = CSV_PARSE_SUCCESSFUL;
-        return csv;
+    fclose(csvfile);
+    *error = CSV_PARSE_SUCCESSFUL;
+    return csv;
         
     fail:
         fclose(csvfile);
@@ -257,13 +254,64 @@ static int csv_get_header(struct csv *csv, FILE * const csvfile)
         
         switch (c)
         {
-            //quoted fields need to backtrack the lead pointer to ignore quotes
+            //quoted fields
             case '"':
                 lag++;
                 lead++;
+                
+                //advance lead to consume all chars incl. escape sequences
+                while (1)
+                {
+                    c = getc(csvfile);
+                    
+                    if (c == '"')
+                    {
+                        c = getc(csvfile);
+                        
+                        //else advances by two to consume both quotes
+                        if (c == ',' || c == '\n') break;
+                        else lead += 2;
+                    }
+                    else lead++;
+                }
+                
+                //identical to default, just copy contents to a temp space
+                tmp = malloc(sizeof(char) * (lead - lag) + 1);
+                if (tmp == NULL) return CSV_MALLOC_FAILED;
+                
+                fsetpos(csvfile, (const fpos_t *) &lag);
+                fread(tmp, sizeof(char), lead - lag, csvfile);
+                tmp[lead - lag] = '\0';
+                
+                //unlike default, need to transform quote pairs to single quotes
+                char *tmp_2 = malloc(sizeof(char) * (lead - lag) + 1);
+                if (tmp_2 == NULL) return CSV_MALLOC_FAILED;
+                
+                for (uint64_t j = 0, i = 0; j < strlen(tmp) + 1; j++, i++)
+                {
+                    if (tmp[j] == '"' && tmp[j+1] == '"')
+                    {
+                        tmp_2[i] = '"';
+                        j++;
+                    }
+                    else tmp_2[i] = tmp[j];
+                }
+                
+                //shrink array to remove bytes once held by the escape quotes
+                free(tmp);
+                tmp = malloc(sizeof(char) * strlen(tmp_2) + 1);
+                memcpy(tmp, tmp_2, strlen(tmp_2) + 1);
+                free(tmp_2);
+                csv->header[i] = tmp;
+                
+                //reset lag, lead, and file pos at next column.
+                lead += 2;
+                fsetpos(csvfile, (const fpos_t *) &lead);
+                lag = lead;
+                
                 break;
             
-            //unquoted fields read straight through until comma or linefeed
+            //unquoted fields
             default:
                 while (!(c == ',' || c == '\n')) 
                 {
