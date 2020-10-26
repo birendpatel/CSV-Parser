@@ -8,6 +8,7 @@
 #define CSV_H
 
 #include <stdint.h>
+#include <stdbool.h>
 
 /*******************************************************************************
 * NAME: struct csv_cell
@@ -18,7 +19,7 @@
 *******************************************************************************/
 struct csv_cell
 {
-    enum {INTEGER_TYPE, FLOATING_TYPE, STRING_TYPE, CHAR_TYPE} type;
+    enum {INTEGER_TYPE, FLOATING_TYPE, STRING_TYPE, CHAR_TYPE, NONE_TYPE} type;
     enum {MISSING, PRESENT} status;
     union
     {
@@ -36,30 +37,43 @@ struct csv_cell
 * @ cols : total columns
 * @ missing : total missing values
 * @ total : total values parsed, including missing values
+* @ header: array of column names, null when header not available
 * @ data : dimensions rows x cols
 *******************************************************************************/
 struct csv
 {
     uint32_t rows;
     uint32_t cols;
-    uint32_t missing;
-    uint32_t total;
+    uint64_t missing;
+    uint64_t total;
+    char *header;
     struct csv_cell data[];
-} csv;
+};
+
+/*******************************************************************************
+* NAME: csv_init
+* DESC: syntactic sugar to suppress -Wuninitialized
+*******************************************************************************/
+#define csv_init() NULL
 
 /*******************************************************************************
 * NAME: csv_read
 * DESC: read a RFC 4180 compliant csv file into memory
-* OUTP: error code macro
-* @ csv : on success a pointer to dynamically allocated struct csv
-* @ fname : csv filename
-* @ sep : override RFC 4180 with non-compliant separator
+* OUTP: enumerated error code
+* @ filename : csv filename
+* @ header : true if first row of csv file contains column headers
 *******************************************************************************/
-int csv_read(struct csv *csv, const char *fname, const char sep);
+int csv_read(struct csv *csv, const char * const filename, const bool header);
 
-#define CSV_NULL_INPUT_POINTER
-#define CSV_INVALID_FILE_NAME
-#define CSV_MALLOC_FAILED
+enum
+{
+    CSV_PARSE_SUCCESSFUL        = 0,
+    CSV_NULL_FILENAME           = 1,
+    CSV_INVALID_FILE            = 2,
+    CSV_MALLOC_FAILED           = 3,
+    CSV_EMPTY_FILE              = 4,
+    CSV_FATAL_UNGETC_FAILED     = 5,
+};
 
 /*******************************************************************************
 * NAME: csv_free
