@@ -12,16 +12,12 @@
 #include <limits.h>
 
 /*******************************************************************************
-Implementation local error codes
+local error codes, propagate to API error codes
 */
 
 enum
 {
     SUCCESS = 0,
-    UNGETC_FAILED = 1,
-    MALLOC_FAILED = 2,
-    COLS_OVERFLOW = 3,
-    ROWS_OVERFLOW = 4,
 };
 
 /*******************************************************************************
@@ -82,17 +78,7 @@ struct csv *csv_read(const char * const filename, const bool header, int *error)
     status = csv_get_dims(csvfile, header, &rows, &cols);
     
     if (status == SUCCESS) rewind(csvfile);
-    else
-    {
-        if (status == UNGETC_FAILED)
-            CSV_TERMINATE(error, CSV_FATAL_UNGETC_FAILED, fail);
-        if (status == COLS_OVERFLOW)
-            CSV_TERMINATE(error, CSV_NUM_COLUMNS_OVERFLOW, fail);
-        if (status == ROWS_OVERFLOW)
-            CSV_TERMINATE(error, CSV_NUM_ROWS_OVERFLOW, fail);
-        
-        goto fail;
-    }
+    else CSV_TERMINATE(error, status, fail);
     
     //setup struct csv
     uint64_t total_cells = (uint64_t) rows * (uint64_t) cols;
@@ -111,10 +97,7 @@ struct csv *csv_read(const char * const filename, const bool header, int *error)
         if (header == true) 
         {
             status = csv_get_header(csv, csvfile);
-            if (status == MALLOC_FAILED) 
-            {
-                CSV_TERMINATE(error, CSV_MALLOC_FAILED, fail);
-            }
+            if (status != SUCCESS) CSV_TERMINATE(error, status, fail);
         }
         else csv->header = NULL;
     }
@@ -166,7 +149,7 @@ static int csv_get_dims
             //comma indicates additional column
             case ',':
                 (*cols)++;
-                if (*cols == 0) return COLS_OVERFLOW;
+                if (*cols == 0) return CSV_NUM_COLUMNS_OVERFLOW;
                 break;
             
             //linefeed indicates row termination, check RFC 4180 rule 2 and exit
@@ -176,7 +159,7 @@ static int csv_get_dims
                 if (c == EOF) goto found_eof;
                 else
                 {
-                    if (c != ungetc(c, csvfile)) return UNGETC_FAILED;
+                    if (c != ungetc(c, csvfile)) return CSV_FATAL_UNGETC;
                     else goto found_more;
                 }
             
@@ -219,9 +202,9 @@ static int csv_get_dims
                 if (c == EOF) goto terminate;
                 else
                 {
-                    if (c != ungetc(c, csvfile)) return UNGETC_FAILED;
+                    if (c != ungetc(c, csvfile)) return CSV_FATAL_UNGETC;
                     (*rows)++;
-                    if (*rows == 0) return ROWS_OVERFLOW;
+                    if (*rows == 0) return CSV_NUM_ROWS_OVERFLOW;
                 }
                 
                 break;
@@ -243,7 +226,7 @@ static int csv_get_dims
     //RFC 4180 rule 2 exception to account for last row ending without linefeed
     terminate:
         (*rows)++;
-        if (*rows == 0) return ROWS_OVERFLOW;
+        if (*rows == 0) return CSV_NUM_ROWS_OVERFLOW;
     
     assert (*rows >= 1 && "one or zero columns found, goto error");
     
@@ -266,7 +249,7 @@ static int csv_get_header(struct csv *csv, FILE * const csvfile)
     char *tmp = NULL;
     
     csv->header = malloc(sizeof(void*) * (uint64_t) csv->rows);
-    if (csv->header == NULL) return MALLOC_FAILED;
+    if (csv->header == NULL) return CSV_MALLOC_FAILED;
     
     while (i != csv->cols)
     {
@@ -289,7 +272,7 @@ static int csv_get_header(struct csv *csv, FILE * const csvfile)
                 }
                 
                 tmp = malloc(sizeof(char) * (lead - lag) + 1);
-                if (tmp == NULL) return MALLOC_FAILED;
+                if (tmp == NULL) return CSV_MALLOC_FAILED;
                 
                 //copy column name directly from file to header array
                 fsetpos(csvfile, (const fpos_t *) &lag);
