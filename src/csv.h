@@ -46,24 +46,19 @@ struct csv
     uint32_t cols;
     uint64_t missing;
     uint64_t total;
-    char *header;
+    char **header;
     struct csv_cell data[];
 };
 
 /*******************************************************************************
-* NAME: csv_init
-* DESC: syntactic sugar to suppress -Wuninitialized
-*******************************************************************************/
-#define csv_init() NULL
-
-/*******************************************************************************
 * NAME: csv_read
 * DESC: read a RFC 4180 compliant csv file into memory
-* OUTP: enumerated error code
+* OUTP: dynamically allocated struct csv, if null check error arg for details
 * @ filename : csv filename
 * @ header : true if first row of csv file contains column headers
+* @ error : enumerated error code
 *******************************************************************************/
-int csv_read(struct csv *csv, const char * const filename, const bool header);
+struct csv *csv_read(const char * const filename, const bool header, int *error);
 
 enum
 {
@@ -73,6 +68,9 @@ enum
     CSV_MALLOC_FAILED           = 3,
     CSV_EMPTY_FILE              = 4,
     CSV_FATAL_UNGETC_FAILED     = 5,
+    CSV_NUM_COLUMNS_OVERFLOW    = 6,
+    CSV_NUM_ROWS_OVERFLOW       = 7,
+    CSV_NULL_ERROR_HANDLE       = 8,
 };
 
 /*******************************************************************************
