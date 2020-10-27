@@ -63,14 +63,12 @@ struct csv *csv_read(const char * const filename, const bool header, int *error)
 enum
 {
     CSV_PARSE_SUCCESSFUL        = 0,
-    CSV_NULL_FILENAME           = 1,
-    CSV_INVALID_FILE            = 2,
-    CSV_MALLOC_FAILED           = 3,
-    CSV_EMPTY_FILE              = 4,
-    CSV_FATAL_UNGETC_FAILED     = 5,
-    CSV_NUM_COLUMNS_OVERFLOW    = 6,
-    CSV_NUM_ROWS_OVERFLOW       = 7,
-    CSV_NULL_ERROR_HANDLE       = 8,
+    CSV_NULL_FILENAME           = 100,
+    CSV_INVALID_FILE            = 101,
+    CSV_NUM_COLUMNS_OVERFLOW    = 200,
+    CSV_NUM_ROWS_OVERFLOW       = 201,
+    CSV_MALLOC_FAILED           = 300,
+    CSV_FATAL_UNGETC            = 400,
 };
 
 /*******************************************************************************

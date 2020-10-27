@@ -13,102 +13,76 @@
 #include <string.h>
 
 /*******************************************************************************
-local error codes, propagate to API error codes
-*/
-
-enum
-{
-    SUCCESS = 0,
-};
-
-/*******************************************************************************
 Static prototypes
 */
 
-static int csv_get_dims
-(
-    FILE * const csvfile,
-    const bool header,
-    uint32_t *rows,
-    uint32_t *cols
-);
-
+static int csv_dims(FILE * const csvfile, bool header, uint32_t *r, uint32_t *c);
+static int csv_cols(FILE * const csvfile, uint32_t *cols);
+static int csv_rows(FILE * const csvfile, uint32_t *rows);
 static int csv_get_header(struct csv *csv, FILE * const csvfile);
-
 
 /*******************************************************************************
 File macros
 */
 
-#define CSV_TERMINATE(error_var, error_name, goto_label)                       \
+#define STOP(error_var, error_name, goto_label)                                \
         do                                                                     \
         {                                                                      \
             *error_var = error_name;                                           \
             goto goto_label;                                                   \
         } while (0)                                                            \
+        
+#define CSV_SIZE sizeof(struct csv)
+#define CELL_SIZE sizeof(struct csv_cell)
+#define SUCCESS 1
+#define UNDEFINED 999
 
 /*******************************************************************************
-Read a CSV file from disk into memory as an array of struct csv_cell, kept as
-the flexible array member of struct csv. First error checking, then fetch the
-required array dimensions, then perform the read.
+Read a CSV file from disk into memory as a 2D array of csv cells. 
 */
 
 struct csv *csv_read(const char * const filename, const bool header, int *error)
 {
-    int status = 0;
-    
-    if (filename == NULL) CSV_TERMINATE(error, CSV_NULL_FILENAME, early_stop);
-    if (error == NULL) CSV_TERMINATE(error, CSV_NULL_ERROR_HANDLE, early_stop);
-    
-    FILE *csvfile = fopen(filename, "rt");
-    
-    //verify that the file exists and is non-empty
-    if (csvfile == NULL) CSV_TERMINATE(error, CSV_INVALID_FILE, early_stop);
-    else
-    {
-        int c = getc(csvfile);
-        
-        if (c == EOF) CSV_TERMINATE(error, CSV_EMPTY_FILE, fail);
-        else rewind(csvfile);
-    }
-    
-    //fetch array dimensions
+    int status = UNDEFINED;
     uint32_t rows = 0;
     uint32_t cols = 0;
+    uint64_t total = 0;
     
-    status = csv_get_dims(csvfile, header, &rows, &cols);
+    if (error == NULL) goto early_stop;
     
-    if (status == SUCCESS) rewind(csvfile);
-    else CSV_TERMINATE(error, status, fail);
+    //verify and open file
+    if (filename == NULL) STOP(error, CSV_NULL_FILENAME, early_stop);
+    FILE *csvfile = fopen(filename, "rt");
+    if (csvfile == NULL) STOP(error, CSV_INVALID_FILE, early_stop);
     
-    //setup struct csv
-    uint64_t total_cells = (uint64_t) rows * (uint64_t) cols;
-    uint64_t cell_size = sizeof(struct csv_cell) * total_cells;
+    //fetch array dimensions
+    status = csv_dims(csvfile, header, &rows, &cols);
+    if (status != SUCCESS) STOP(error, status, fail);
     
-    struct csv *csv = malloc(sizeof(struct csv) + cell_size);
+    //configure struct csv
+    total = (uint64_t) rows * cols;
+    struct csv *csv = malloc(CSV_SIZE + CELL_SIZE * total);
+    if (csv == NULL) STOP(error, CSV_MALLOC_FAILED, fail);
     
-    if (csv == NULL) CSV_TERMINATE(error, CSV_MALLOC_FAILED, fail);
+    csv->rows = rows;
+    csv->cols = cols;
+    csv->total = total;
+    
+    //fetch header
+    if (header == false) csv->header = NULL;
     else
     {
-        csv->rows = rows;
-        csv->cols = cols;
-        csv->total = total_cells;
-        
-        //no rewind after this so that all paths start at the first data row
-        if (header == true) 
-        {
-            status = csv_get_header(csv, csvfile);
-            if (status != SUCCESS) CSV_TERMINATE(error, status, fail);
-        }
-        else csv->header = NULL;
+        status = csv_get_header(csv, csvfile);
+        if (status != SUCCESS) STOP(error, status, fail);
     }
     
     //read each datum into a struct csv_cell
     
-    //error handling   
-    fclose(csvfile);
-    *error = CSV_PARSE_SUCCESSFUL;
-    return csv;
+    //error handling
+    success:
+        fclose(csvfile);
+        *error = CSV_PARSE_SUCCESSFUL;
+        return csv;
         
     fail:
         fclose(csvfile);
@@ -118,47 +92,56 @@ struct csv *csv_read(const char * const filename, const bool header, int *error)
         return NULL;
 }
 
-
 /*******************************************************************************
 Determine the dimensions of the csv file for malloc. The number of rows returned
 is excluding the header. Full RFC 4180 compliance means that we can bypass a few
-error handling routines. It also implies that the first row alone is enough to
-determine the number of columns.
+error handling routines.
 */
 
-static int csv_get_dims
-(
-    FILE * const csvfile,
-    const bool header,
-    uint32_t *rows,
-    uint32_t *cols
-)
+static int csv_dims(FILE * const csvfile, bool header, uint32_t *r, uint32_t *c)
+{
+    int status = UNDEFINED;
+    
+    status = csv_cols(csvfile, c);
+    
+    if (status != SUCCESS) return status;
+    
+    status = csv_rows(csvfile, r);
+    
+    if (status == SUCCESS)
+    {
+        if (header == true) (*r)--;
+        rewind(csvfile);
+    }
+    
+    return status;
+}
+
+/*******************************************************************************
+Read the first row of the CSV file to calculate total columns. RFC implies that 
+the first row alone is enough to determine the number of columns. For double
+quotes, RFC 4180 rule 7 implies all quotes always come in pairs, so we consume
+two quotes at a time without risk, even when they are not the correct pairing.
+*/
+
+static int csv_cols(FILE * const csvfile, uint32_t *cols)
 {
     int c = 0;
-    
     *cols = 1;
     
-    //determine number of columns
+    rewind(csvfile);
+    
     while ((c = getc(csvfile)) != EOF)
     {
         switch (c)
         {
-            //comma indicates additional column
             case ',':
                 (*cols)++;
                 if (*cols == 0) return CSV_NUM_COLUMNS_OVERFLOW;
                 break;
             
-            //linefeed indicates row termination, check RFC 4180 rule 2 and exit
             case '\n':
-                c = getc(csvfile);
-                
-                if (c == EOF) goto found_eof;
-                else
-                {
-                    if (c != ungetc(c, csvfile)) return CSV_FATAL_UNGETC;
-                    else goto found_more;
-                }
+                return SUCCESS;
             
             //double quotes -> consume everything until enclosing quote
             //RFC 4180 rule 7 implies quotes incl. escapes always come in pairs
@@ -176,23 +159,28 @@ static int csv_get_dims
         }
     }
     
-    //by RFC 4180 grammar, header is guaranteed false and there is one data row.
-    found_eof:
-        assert (*cols > 0 && "no columns found");
-        *rows = 1;
-        return SUCCESS;
+    return SUCCESS;
+}
 
-    //the header is not counted in row dimensions
-    found_more:
-        assert (*cols > 0 && "no columns found");
-        if (header == true) *rows = 0;
-        else *rows = 1;
-        
-    //determine the number of rows
+
+/*******************************************************************************
+Calculate total rows, including both the header and the actual data rows. Avoid
+double responsibility so the manager will handle the logic to exclude the header 
+from the total count.
+*/
+
+static int csv_rows(FILE * const csvfile, uint32_t *rows)
+{
+    int c = 0;
+    *rows = 0;
+    
+    rewind(csvfile);
+    
     while ((c = getc(csvfile)) != EOF)
     {
         switch (c)
         {
+            //RFC rule 2 branch for EOF + CRLF
             case '\n':
                 c = getc(csvfile);
                 
@@ -205,7 +193,8 @@ static int csv_get_dims
                 }
                 
                 break;
-                
+            
+            //same as csv_cols, consume until closing quote
             case '"':
                 while (1)
                 {
@@ -220,16 +209,13 @@ static int csv_get_dims
         }
     }
     
-    //RFC 4180 rule 2 exception to account for last row ending without linefeed
+    //RFC 4180 rule 2 exception to account for no CRLF on final row
     terminate:
         (*rows)++;
         if (*rows == 0) return CSV_NUM_ROWS_OVERFLOW;
     
-    assert (*rows >= 1 && "one or zero columns found, goto error");
-    
     return SUCCESS;
 }
-
 
 /*******************************************************************************
 If the CSV file contains a header, dynamically allocate a ragged array of column
@@ -239,6 +225,8 @@ same format as the records.
 
 static int csv_get_header(struct csv *csv, FILE * const csvfile)
 {
+    rewind(csvfile);
+    
     uint32_t i = 0;
     int c = 0;
     uint64_t lag = 0;
@@ -287,19 +275,20 @@ static int csv_get_header(struct csv *csv, FILE * const csvfile)
                 char *tmp_2 = malloc(sizeof(char) * (lead - lag) + 1);
                 if (tmp_2 == NULL) return CSV_MALLOC_FAILED;
                 
-                for (uint64_t j = 0, i = 0; j < strlen(tmp) + 1; j++, i++)
+                for (uint64_t j = 0, k = 0; j < strlen(tmp) + 1; j++, k++)
                 {
                     if (tmp[j] == '"' && tmp[j+1] == '"')
                     {
-                        tmp_2[i] = '"';
+                        tmp_2[k] = '"';
                         j++;
                     }
-                    else tmp_2[i] = tmp[j];
+                    else tmp_2[k] = tmp[j];
                 }
                 
                 //shrink array to remove bytes once held by the escape quotes
                 free(tmp);
                 tmp = malloc(sizeof(char) * strlen(tmp_2) + 1);
+                if (tmp == NULL) return CSV_MALLOC_FAILED;
                 memcpy(tmp, tmp_2, strlen(tmp_2) + 1);
                 free(tmp_2);
                 csv->header[i] = tmp;
@@ -341,8 +330,3 @@ static int csv_get_header(struct csv *csv, FILE * const csvfile)
     
     return SUCCESS;
 }
-
-
-/******************************************************************************/
-
-#undef CSV_TERMINATE
