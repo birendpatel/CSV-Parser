@@ -34,7 +34,7 @@ File macros
         
 #define CSV_SIZE sizeof(struct csv)
 #define CELL_SIZE sizeof(struct csv_cell)
-#define SUCCESS 1
+#define SUCCESS 0
 #define UNDEFINED 999
 
 /*******************************************************************************
@@ -72,6 +72,9 @@ struct csv *csv_read(const char * const filename, const bool header, int *error)
     if (header == false) csv->header = NULL;
     else
     {
+        csv->header = malloc(sizeof(void*) * (uint64_t) csv->rows);
+        if (csv->header == NULL) STOP(error, CSV_MALLOC_FAILED, fail);
+        
         status = csv_get_header(csv, csvfile);
         if (status != SUCCESS) STOP(error, status, fail);
     }
@@ -225,108 +228,47 @@ same format as the records.
 
 static int csv_get_header(struct csv *csv, FILE * const csvfile)
 {
+    int lag = 0;
+    int lead = 0;
+    char *tmp_field = NULL;
+    
+    char *tmp = malloc(CSV_TEMPORARY_BUFFER_LENGTH);
+    if (tmp == NULL) return CSV_MALLOC_FAILED;
+    
     rewind(csvfile);
     
-    uint32_t i = 0;
-    int c = 0;
-    uint64_t lag = 0;
-    uint64_t lead = 0;
-    char *tmp = NULL;
-    
-    csv->header = malloc(sizeof(void*) * (uint64_t) csv->rows);
-    if (csv->header == NULL) return CSV_MALLOC_FAILED;
-    
-    while (i != csv->cols)
+    for (uint32_t i = 0; i < csv->cols; i++)
     {
-        c = getc(csvfile);
+        uint32_t j = 0;
         
-        switch (c)
+        //load temp buffer with next field; remove enclosing quotes and escapes
+        while (1)
         {
-            //quoted fields
-            case '"':
-                lag++;
-                lead++;
-                
-                //advance lead to consume all chars incl. escape sequences
-                while (1)
-                {
-                    c = getc(csvfile);
-                    
-                    if (c == '"')
-                    {
-                        c = getc(csvfile);
-                        
-                        //else advances by two to consume both quotes
-                        if (c == ',' || c == '\n') break;
-                        else lead += 2;
-                    }
-                    else lead++;
-                }
-                
-                //identical to default, just copy contents to a temp space
-                tmp = malloc(sizeof(char) * (lead - lag) + 1);
-                if (tmp == NULL) return CSV_MALLOC_FAILED;
-                
-                fsetpos(csvfile, (const fpos_t *) &lag);
-                fread(tmp, sizeof(char), lead - lag, csvfile);
-                tmp[lead - lag] = '\0';
-                
-                //unlike default, need to transform quote pairs to single quotes
-                char *tmp_2 = malloc(sizeof(char) * (lead - lag) + 1);
-                if (tmp_2 == NULL) return CSV_MALLOC_FAILED;
-                
-                for (uint64_t j = 0, k = 0; j < strlen(tmp) + 1; j++, k++)
-                {
-                    if (tmp[j] == '"' && tmp[j+1] == '"')
-                    {
-                        tmp_2[k] = '"';
-                        j++;
-                    }
-                    else tmp_2[k] = tmp[j];
-                }
-                
-                //shrink array to remove bytes once held by the escape quotes
-                free(tmp);
-                tmp = malloc(sizeof(char) * strlen(tmp_2) + 1);
-                if (tmp == NULL) return CSV_MALLOC_FAILED;
-                memcpy(tmp, tmp_2, strlen(tmp_2) + 1);
-                free(tmp_2);
-                csv->header[i] = tmp;
-                
-                //reset lag, lead, and file pos at next column.
-                lead += 2;
-                fsetpos(csvfile, (const fpos_t *) &lead);
-                lag = lead;
-                
-                break;
+            lag = getc(csvfile);
             
-            //unquoted fields
-            default:
-                while (!(c == ',' || c == '\n')) 
-                {
-                    lead++;
-                    c = getc(csvfile);
-                }
+            if (lag == '"')
+            {
+                lead = getc(csvfile);
                 
-                tmp = malloc(sizeof(char) * (lead - lag) + 1);
-                if (tmp == NULL) return CSV_MALLOC_FAILED;
-                
-                //copy column name directly from file to header array
-                fsetpos(csvfile, (const fpos_t *) &lag);
-                fread(tmp, sizeof(char), lead - lag, csvfile);
-                tmp[lead - lag] = '\0';
-                csv->header[i] = tmp;
-                
-                //reset lag, lead, and file pos at next column
-                ++lead;
-                fsetpos(csvfile, (const fpos_t *) &lead);
-                lag = lead;
-                
-                break;
+                if (lead == ',' || lead == '\n') break;
+                else tmp[j++] = (char) lead;
+            }
+            else if (lag == ',' || lag == '\n') break;
+            else tmp[j++] = (char) lag;
+            
+            if (j == 0) return CSV_FIELD_LEN_OVERFLOW;
         }
         
-        i++;
+        tmp[j] = '\0';
+        
+        //copy temp to size-appropriate block and save
+        tmp_field = malloc(strlen(tmp) + 1);
+        if (tmp_field == NULL) return CSV_MALLOC_FAILED;
+        strncpy(tmp_field, tmp, strlen(tmp) + 1);
+        csv->header[i] = tmp_field;
     }
     
-    return SUCCESS;
+    free(tmp);
+    
+    return SUCCESS;    
 }
