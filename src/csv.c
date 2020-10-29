@@ -19,7 +19,9 @@ Static prototypes
 static int csv_dims(FILE * const csvfile, bool header, uint32_t *r, uint32_t *c);
 static int csv_cols(FILE * const csvfile, uint32_t *cols);
 static int csv_rows(FILE * const csvfile, uint32_t *rows);
-static int csv_get_header(struct csv *csv, FILE * const csvfile);
+static int tokenize(FILE * const csvfile, char *buffer, int n);
+static int csv_get_header(struct csv *csv, FILE * const csvfile, fpos_t *pos);
+static int csv_get_data(struct csv *csv, FILE * const csvfile, fpos_t data_pos);
 
 /*******************************************************************************
 File macros
@@ -47,6 +49,7 @@ struct csv *csv_read(const char * const filename, const bool header, int *error)
     uint32_t rows = 0;
     uint32_t cols = 0;
     uint64_t total = 0;
+    fpos_t data_pos = 0;
     
     if (error == NULL) goto early_stop;
     
@@ -68,18 +71,19 @@ struct csv *csv_read(const char * const filename, const bool header, int *error)
     csv->cols = cols;
     csv->total = total;
     
-    //fetch header
+    //fetch header    
     if (header == false) csv->header = NULL;
     else
     {
         csv->header = malloc(sizeof(void*) * (uint64_t) csv->rows);
         if (csv->header == NULL) STOP(error, CSV_MALLOC_FAILED, fail);
         
-        status = csv_get_header(csv, csvfile);
+        status = csv_get_header(csv, csvfile, &data_pos);
         if (status != SUCCESS) STOP(error, status, fail);
     }
     
-    //read each datum into a struct csv_cell
+    //read each datum into a struct csv_cell       
+    csv_get_data(csv, csvfile, data_pos);
     
     //error handling
     success:
@@ -220,16 +224,53 @@ static int csv_rows(FILE * const csvfile, uint32_t *rows)
     return SUCCESS;
 }
 
+
 /*******************************************************************************
-If the CSV file contains a header, dynamically allocate a ragged array of column
-names and assign to struct csv metadata. By RFC 4180 rule 3, the header has the
-same format as the records.
+Field tokenizer. Read next field from current file position and write it into
+the target buffer as a nul-terminated string. EOF condition is not used in the
+header processing. Enclosing quotes and escape sequence quotes are removed.
 */
 
-static int csv_get_header(struct csv *csv, FILE * const csvfile)
+static int tokenize(FILE * const csvfile, char *buffer, int n)
 {
     int lag = 0;
     int lead = 0;
+    uint32_t i = 0;
+    
+    while (1)
+    {
+        lag = getc(csvfile);
+        
+        if (lag == '"')
+        {
+            lead = getc(csvfile);
+            
+            if (lead == ',' || lead == '\n' || lead == EOF) break;
+            else buffer[i++] = (char) lead;
+        }
+        else if (lag == ',' || lag == '\n' || lag == EOF) break;
+        else buffer[i++] = (char) lag;
+        
+        if (i == 0) return CSV_FIELD_LEN_OVERFLOW;
+    }
+    
+    if (i == (uint32_t) n) return CSV_BUFFER_OVERFLOW;
+    
+    buffer[i] = '\0';
+    
+    return SUCCESS;
+}
+
+
+/*******************************************************************************
+If the CSV file contains a header, dynamically allocate a ragged array of column
+names and assign to struct csv metadata. By RFC 4180 rule 3, the header has the
+same format as the records. Note the file position as the start of the data.
+*/
+
+static int csv_get_header(struct csv *csv, FILE * const csvfile, fpos_t *pos)
+{
+    int status = UNDEFINED;
     char *tmp_field = NULL;
     
     char *tmp = malloc(CSV_TEMPORARY_BUFFER_LENGTH);
@@ -239,27 +280,9 @@ static int csv_get_header(struct csv *csv, FILE * const csvfile)
     
     for (uint32_t i = 0; i < csv->cols; i++)
     {
-        uint32_t j = 0;
-        
-        //load temp buffer with next field; remove enclosing quotes and escapes
-        while (1)
-        {
-            lag = getc(csvfile);
-            
-            if (lag == '"')
-            {
-                lead = getc(csvfile);
-                
-                if (lead == ',' || lead == '\n') break;
-                else tmp[j++] = (char) lead;
-            }
-            else if (lag == ',' || lag == '\n') break;
-            else tmp[j++] = (char) lag;
-            
-            if (j == 0) return CSV_FIELD_LEN_OVERFLOW;
-        }
-        
-        tmp[j] = '\0';
+        //load temp buffer with next field
+        status = tokenize(csvfile, tmp, CSV_TEMPORARY_BUFFER_LENGTH);
+        if (status != SUCCESS) return status;
         
         //copy temp to size-appropriate block and save
         tmp_field = malloc(strlen(tmp) + 1);
@@ -269,6 +292,41 @@ static int csv_get_header(struct csv *csv, FILE * const csvfile)
     }
     
     free(tmp);
+    fgetpos(csvfile, pos);
     
     return SUCCESS;    
+}
+
+
+/*******************************************************************************
+Load flexible array of struct csv with all of the file contents. Read a field
+one by one into a temporary buffer. Analyze the field to infer its type. Then
+perform some extra analysis if required to set columns to homogenous types using
+sampling and frequency lists.
+*/
+
+static int csv_get_data(struct csv *csv, FILE * const csvfile, fpos_t data_pos)
+{
+    int status = UNDEFINED;
+    uint64_t missing = 0;
+    
+    char *tmp = malloc(CSV_TEMPORARY_BUFFER_LENGTH);
+    if (tmp == NULL) return CSV_MALLOC_FAILED;
+    
+    fsetpos(csvfile, &data_pos);
+    
+    for (uint32_t i = 0; i < csv->rows; i++)
+    {
+        for (uint32_t j = 0; j < csv->cols; j++)
+        {
+            //load temp buffer with next field
+            status = tokenize(csvfile, tmp, CSV_TEMPORARY_BUFFER_LENGTH);
+            if (status != SUCCESS) return status;
+            
+            puts(tmp);
+        }
+    }
+    
+    free(tmp);
+    return SUCCESS;
 }
