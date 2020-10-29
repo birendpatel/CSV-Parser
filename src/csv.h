@@ -13,7 +13,7 @@
 /*******************************************************************************
 * NAME: struct csv_cell
 * DESC: in-memory representation of a single value of the csv file
-* @ type : union tag
+* @ type : union tag, none type is set if and only if missing status is set
 * @ status : missing if data not found during parsing
 * @ value : string type data is dynamically allocated and null terminated
 *******************************************************************************/
@@ -29,6 +29,14 @@ struct csv_cell
         char    chrval;
     } value;
 };
+
+/*******************************************************************************
+* NAME: CSV_TEMPORARY_BUFFER_LENGTH
+* DESC: implementation uses by default a 1 KiB buffer to process each csv cell. 
+* NOTE: temporary buffers are allocated on the heap
+* NOTE: can be modified to any positive value depending on the expected types
+*******************************************************************************/
+#define CSV_TEMPORARY_BUFFER_LENGTH 1024
 
 /*******************************************************************************
 * NAME: struct csv
@@ -63,12 +71,14 @@ struct csv *csv_read(const char * const filename, const bool header, int *error)
 enum
 {
     CSV_PARSE_SUCCESSFUL        = 0,
-    CSV_NULL_FILENAME           = 100,
-    CSV_INVALID_FILE            = 101,
-    CSV_NUM_COLUMNS_OVERFLOW    = 200,
-    CSV_NUM_ROWS_OVERFLOW       = 201,
-    CSV_MALLOC_FAILED           = 300,
-    CSV_FATAL_UNGETC            = 400,
+    CSV_NULL_FILENAME           = 1,
+    CSV_INVALID_FILE            = 2,
+    CSV_NUM_COLUMNS_OVERFLOW    = 3,
+    CSV_NUM_ROWS_OVERFLOW       = 4,
+    CSV_FIELD_LEN_OVERFLOW      = 5,
+    CSV_BUFFER_OVERFLOW         = 6,
+    CSV_MALLOC_FAILED           = 7,
+    CSV_FATAL_UNGETC            = 8,
 };
 
 /*******************************************************************************
