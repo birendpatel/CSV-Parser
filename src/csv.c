@@ -11,6 +11,7 @@
 #include <assert.h>
 #include <limits.h>
 #include <string.h>
+#include <errno.h>
 
 /*******************************************************************************
 Static prototypes
@@ -30,7 +31,7 @@ File macros
 #define STOP(error_var, error_name, goto_label)                                \
         do                                                                     \
         {                                                                      \
-            *error_var = error_name;                                           \
+            if (error != NULL) *error_var = error_name;                        \
             goto goto_label;                                                   \
         } while (0)                                                            \
 
@@ -47,8 +48,6 @@ struct csv *csv_read(const char * const filename, const bool header, int *error)
     uint32_t rows = 0;
     uint32_t cols = 0;
     fpos_t data_pos = 0;
-    
-    if (error == NULL) goto early_stop;
     
     //verify and open file
     if (filename == NULL) STOP(error, CSV_NULL_FILENAME, early_stop);
@@ -86,7 +85,7 @@ struct csv *csv_read(const char * const filename, const bool header, int *error)
     //error handling
     success:
         fclose(csvfile);
-        *error = CSV_PARSE_SUCCESSFUL;
+        if (error != NULL) *error = CSV_PARSE_SUCCESSFUL;
         return csv;
         
     fail:
@@ -384,4 +383,52 @@ void csv_free(struct csv *csv)
     free(csv->data);
     
     free(csv);
+}
+
+
+/*******************************************************************************
+
+*/
+
+long *csv_row_as_long(struct csv *csv, const uint32_t i, int *error)
+{
+    if (csv == NULL) STOP(error, CSV_NULL_INPUT_POINTER, early_stop);
+    if (i >= csv->rows) STOP(error, CSV_PARAM_OUT_OF_BOUNDS, early_stop);
+    
+    long *data = malloc(sizeof(int) * csv->cols);
+    if (data == NULL) STOP(error, CSV_MALLOC_FAILED, early_stop);
+
+    for (uint32_t j = 0; j < csv->cols; j++)
+    {
+        errno = 0;
+        long tmp = 0;
+        char *end = NULL;
+        
+        tmp = strtol(csv->data[i][j], &end, 10);
+        
+        //parse error handling
+        if (csv->data[i][j] == end) 
+            STOP(error, CSV_READ_FAIL, fail);
+        if (errno == ERANGE && tmp == LONG_MIN)
+            STOP(error, CSV_READ_UNDERFLOW, fail);
+        if (errno == ERANGE && tmp == LONG_MAX)
+            STOP(error, CSV_READ_OVERFLOW, fail);
+        if (errno == 0 && *end != '\0')
+            STOP(error, CSV_READ_PARTIAL, fail);
+        if (errno != 0)
+            STOP(error, CSV_UNKNOWN_FATAL_ERROR, fail);
+        
+        //success
+        data[j] = tmp;
+    }
+    
+    if (error != NULL) *error = CSV_PARSE_SUCCESSFUL;
+    return data;
+    
+    fail:
+        free(data);
+        return NULL;
+    
+    early_stop:
+        return NULL;
 }
