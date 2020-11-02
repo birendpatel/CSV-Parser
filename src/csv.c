@@ -19,7 +19,7 @@ Static prototypes
 static int csv_dims(FILE * const csvfile, bool header, uint32_t *r, uint32_t *c);
 static int csv_cols(FILE * const csvfile, uint32_t *cols);
 static int csv_rows(FILE * const csvfile, uint32_t *rows);
-static int tokenize(FILE * const csvfile, char *buffer, int n);
+static int csv_tokenize(FILE * const csvfile, char *buffer, int n);
 static int csv_get_header(struct csv *csv, FILE * const csvfile, fpos_t *pos);
 static int csv_get_data(struct csv *csv, FILE * const csvfile, fpos_t data_pos);
 
@@ -33,9 +33,7 @@ File macros
             *error_var = error_name;                                           \
             goto goto_label;                                                   \
         } while (0)                                                            \
-        
-#define CSV_SIZE sizeof(struct csv)
-#define CELL_SIZE sizeof(struct csv_cell)
+
 #define SUCCESS 0
 #define UNDEFINED 999
 
@@ -48,7 +46,6 @@ struct csv *csv_read(const char * const filename, const bool header, int *error)
     int status = UNDEFINED;
     uint32_t rows = 0;
     uint32_t cols = 0;
-    uint64_t total = 0;
     fpos_t data_pos = 0;
     
     if (error == NULL) goto early_stop;
@@ -63,27 +60,28 @@ struct csv *csv_read(const char * const filename, const bool header, int *error)
     if (status != SUCCESS) STOP(error, status, fail);
     
     //configure struct csv
-    total = (uint64_t) rows * cols;
-    struct csv *csv = malloc(CSV_SIZE + CELL_SIZE * total);
+    struct csv *csv = malloc(sizeof(struct csv));
     if (csv == NULL) STOP(error, CSV_MALLOC_FAILED, fail);
     
     csv->rows = rows;
     csv->cols = cols;
-    csv->total = total;
+    csv->total = (uint64_t) rows * cols;
     
     //fetch header    
     if (header == false) csv->header = NULL;
     else
-    {
-        csv->header = malloc(sizeof(void*) * (uint64_t) csv->rows);
-        if (csv->header == NULL) STOP(error, CSV_MALLOC_FAILED, fail);
-        
+    {       
         status = csv_get_header(csv, csvfile, &data_pos);
         if (status != SUCCESS) STOP(error, status, fail);
     }
     
-    //read each datum into a struct csv_cell       
-    csv_get_data(csv, csvfile, data_pos);
+    //read each datum into a 2D array of strings (3D ragged array)    
+    status = csv_get_data(csv, csvfile, data_pos);
+    if (status != SUCCESS) STOP(error, status, fail);
+    
+    //sanity checks
+    if (csv->total <= csv->missing) STOP(error, CSV_UNKNOWN_FATAL_ERROR, fail);
+    else goto success;
     
     //error handling
     success:
@@ -231,7 +229,7 @@ the target buffer as a nul-terminated string. EOF condition is not used in the
 header processing. Enclosing quotes and escape sequence quotes are removed.
 */
 
-static int tokenize(FILE * const csvfile, char *buffer, int n)
+static int csv_tokenize(FILE * const csvfile, char *buffer, int n)
 {
     int lag = 0;
     int lead = 0;
@@ -271,24 +269,27 @@ same format as the records. Note the file position as the start of the data.
 static int csv_get_header(struct csv *csv, FILE * const csvfile, fpos_t *pos)
 {
     int status = UNDEFINED;
-    char *tmp_field = NULL;
     
+    rewind(csvfile);
+    
+    //intermediate buffer for each file read
     char *tmp = malloc(CSV_TEMPORARY_BUFFER_LENGTH);
     if (tmp == NULL) return CSV_MALLOC_FAILED;
     
-    rewind(csvfile);
+    //final target for header contents
+    csv->header = malloc(sizeof(void*) * (uint64_t) csv->rows);
+    if (csv->header == NULL) return CSV_MALLOC_FAILED;
     
     for (uint32_t i = 0; i < csv->cols; i++)
     {
         //load temp buffer with next field
-        status = tokenize(csvfile, tmp, CSV_TEMPORARY_BUFFER_LENGTH);
+        status = csv_tokenize(csvfile, tmp, CSV_TEMPORARY_BUFFER_LENGTH);
         if (status != SUCCESS) return status;
         
         //copy temp to size-appropriate block and save
-        tmp_field = malloc(strlen(tmp) + 1);
-        if (tmp_field == NULL) return CSV_MALLOC_FAILED;
-        strncpy(tmp_field, tmp, strlen(tmp) + 1);
-        csv->header[i] = tmp_field;
+        csv->header[i] = malloc(strlen(tmp) + 1);
+        if (csv->header[i] == NULL) return CSV_MALLOC_FAILED;
+        strncpy(csv->header[i], tmp, strlen(tmp) + 1);
     }
     
     free(tmp);
@@ -308,25 +309,79 @@ sampling and frequency lists.
 static int csv_get_data(struct csv *csv, FILE * const csvfile, fpos_t data_pos)
 {
     int status = UNDEFINED;
-    uint64_t missing = 0;
+    csv->missing = 0;
     
+    fsetpos(csvfile, &data_pos);
+    
+    //intermediate buffer for each file read
     char *tmp = malloc(CSV_TEMPORARY_BUFFER_LENGTH);
     if (tmp == NULL) return CSV_MALLOC_FAILED;
     
-    fsetpos(csvfile, &data_pos);
+    //alloc data as a 2D array for [i][j] indexing
+    csv->data = malloc(sizeof(void*) * (uint64_t) csv->rows);
+    if (csv->data == NULL) return CSV_MALLOC_FAILED;
+    
+    for (uint32_t i = 0; i < csv->rows; i++)
+    {
+        csv->data[i] = malloc(sizeof(void*) * (uint64_t) csv->cols);
+        if (csv->data[i] == NULL) return CSV_MALLOC_FAILED;   
+    }
     
     for (uint32_t i = 0; i < csv->rows; i++)
     {
         for (uint32_t j = 0; j < csv->cols; j++)
         {
             //load temp buffer with next field
-            status = tokenize(csvfile, tmp, CSV_TEMPORARY_BUFFER_LENGTH);
+            status = csv_tokenize(csvfile, tmp, CSV_TEMPORARY_BUFFER_LENGTH);
             if (status != SUCCESS) return status;
             
-            puts(tmp);
+            //load csv cell
+            if (tmp[0] == '\0')
+            {
+                csv->data[i][j] = NULL;
+                csv->missing++;
+            }
+            else
+            {
+                csv->data[i][j] = malloc(strlen(tmp) + 1);
+                if (csv->data[i][j] == NULL) return CSV_MALLOC_FAILED;
+                strncpy(csv->data[i][j], tmp, strlen(tmp) + 1);
+            }
         }
     }
     
     free(tmp);
-    return SUCCESS;
+    return status;
+}
+
+
+/*******************************************************************************
+Quite a lot of dynamic allocations happened during csv_read. First release the 
+headers, then release char data pointers, release column arrays, release row
+arrays, and finally release the struct itself. DrMemory double checks everything
+in the unit test source.
+*/
+
+void csv_free(struct csv *csv)
+{    
+    for (uint32_t i = 0; i < csv->cols; i++)
+    {
+        free(csv->header[i]);
+    }
+    
+    free(csv->header);
+    
+    for (uint32_t i = 0; i < csv->rows; i++)
+    {        
+        for (uint32_t j = 0; j < csv->cols; j++)
+        {
+            free(csv->data[i][j]);
+        }
+        
+        free(csv->data[i]);
+    }
+    
+    free(csv->data);
+    
+    free(csv);
 }

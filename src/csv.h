@@ -1,6 +1,6 @@
 /*
 * NAME: Copyright (c) 2020, Biren Patel
-* DESC: Read a RFC 4180 compliant CSV file into memory with inferred types
+* DESC: Read a RFC 4180 compliant CSV file into memory as a 2D array of strings
 * LISC: MIT License
 */
 
@@ -9,26 +9,6 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-
-/*******************************************************************************
-* NAME: struct csv_cell
-* DESC: in-memory representation of a single value of the csv file
-* @ type : union tag, none type is set if and only if missing status is set
-* @ status : missing if data not found during parsing
-* @ value : string type data is dynamically allocated and null terminated
-*******************************************************************************/
-struct csv_cell
-{
-    enum {INTEGER_TYPE, FLOATING_TYPE, STRING_TYPE, CHAR_TYPE, NONE_TYPE} type;
-    enum {MISSING, PRESENT} status;
-    union
-    {
-        int64_t intval;
-        double  dblval;
-        char*   strval;
-        char    chrval;
-    } value;
-};
 
 /*******************************************************************************
 * NAME: CSV_TEMPORARY_BUFFER_LENGTH
@@ -46,7 +26,7 @@ struct csv_cell
 * @ missing : total missing values
 * @ total : total values parsed, including missing values
 * @ header: array of column names, null when header not available
-* @ data : dimensions rows x cols
+* @ data : rows X cols 3D ragged array. Element is null pointer when missing.
 *******************************************************************************/
 struct csv
 {
@@ -55,7 +35,7 @@ struct csv
     uint64_t missing;
     uint64_t total;
     char **header;
-    struct csv_cell data[];
+    char ***data;
 };
 
 /*******************************************************************************
@@ -79,6 +59,7 @@ enum
     CSV_BUFFER_OVERFLOW         = 6,
     CSV_MALLOC_FAILED           = 7,
     CSV_FATAL_UNGETC            = 8,
+    CSV_UNKNOWN_FATAL_ERROR     = 9,
 };
 
 /*******************************************************************************
