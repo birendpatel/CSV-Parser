@@ -12,9 +12,7 @@
 
 /*******************************************************************************
 * NAME: CSV_TEMPORARY_BUFFER_LENGTH
-* DESC: implementation uses by default a 1 KiB buffer to process each csv cell. 
-* NOTE: temporary buffers are allocated on the heap
-* NOTE: can be modified to any positive value depending on the expected types
+* DESC: implementation uses default 1 KiB heap buffer to process each field
 * NOTE: overflow during csv processing wil result in CSV_BUFFER_OVERFLOW error
 *******************************************************************************/
 #define CSV_TEMPORARY_BUFFER_LENGTH 1024
@@ -23,7 +21,7 @@
 * NAME: csv_error_t
 * DESC: API error codes
 * NOTE: use CSV_UNDEFINED to silence -Wuninitialized
-* NOTE: use decode function for explicit error details
+* NOTE: pass error code to csv_errno_decode() for error details
 *******************************************************************************/
 typedef enum
 {
@@ -96,6 +94,7 @@ void csv_free(struct csv *csv);
 *******************************************************************************/
 long *csv_rowl(struct csv *csv, const uint32_t i, const int base, csv_errno *error);
 char *csv_rowc(struct csv *csv, const uint32_t i, csv_errno *error);
+double *csv_rowd(struct csv *csv, const uint32_t i, csv_errno *error);
 
 /*******************************************************************************
 * NAME: csv_col[*]
@@ -106,5 +105,6 @@ char *csv_rowc(struct csv *csv, const uint32_t i, csv_errno *error);
 *******************************************************************************/
 long *csv_coll(struct csv *csv, const uint32_t j, const int base, csv_errno *error);
 char *csv_colc(struct csv *csv, const uint32_t j, csv_errno *error);
+double *csv_cold(struct csv *csv, const uint32_t j, csv_errno *error);
 
 #endif
