@@ -23,8 +23,8 @@ int main(void)
     //the struct is transparent so you can access the header and field metadata
     for (size_t i = 0; i < csv->cols; i++) puts(csv->headers[i]);
     printf("total missing fields: %d\n", csv->missing);
-    printf("total rows: %d\n", csv_rows);
-    printf("total cols: %d\n", csv_cols);
+    printf("total rows: %d\n", csv->rows);
+    printf("total cols: %d\n", csv->cols);
     
     //all values are stored in a 2D array of null-terminated strings
     puts(csv->data[3][4]);
