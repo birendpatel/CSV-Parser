@@ -17,12 +17,12 @@
 Static prototypes
 */
 
-static int csv_dims(FILE * const csvfile, bool header, uint32_t *r, uint32_t *c);
-static int csv_cols(FILE * const csvfile, uint32_t *cols);
-static int csv_rows(FILE * const csvfile, uint32_t *rows);
-static int csv_tokenize(FILE * const csvfile, char *buffer, int n);
-static int csv_get_header(struct csv *csv, FILE * const csvfile, fpos_t *pos);
-static int csv_get_data(struct csv *csv, FILE * const csvfile, fpos_t data_pos);
+static csv_errno csv_dims(FILE * const csvfile, bool header, uint32_t *r, uint32_t *c);
+static csv_errno csv_cols(FILE * const csvfile, uint32_t *cols);
+static csv_errno csv_rows(FILE * const csvfile, uint32_t *rows);
+static csv_errno csv_tokenize(FILE * const csvfile, char *buffer, int n);
+static csv_errno csv_get_header(struct csv *csv, FILE * const csvfile, fpos_t *pos);
+static csv_errno csv_get_data(struct csv *csv, FILE * const csvfile, fpos_t data_pos);
 
 /*******************************************************************************
 File macros
@@ -35,16 +35,13 @@ File macros
             goto goto_label;                                                   \
         } while (0)                                                            \
 
-#define SUCCESS 0
-#define UNDEFINED 999
-
 /*******************************************************************************
 Read a CSV file from disk into memory as a 2D array of csv cells. 
 */
 
-struct csv *csv_read(const char * const filename, const bool header, int *error)
+struct csv *csv_read(const char * const filename, const bool header, csv_errno *error)
 {
-    int status = UNDEFINED;
+    csv_errno status = CSV_UNDEFINED;
     uint32_t rows = 0;
     uint32_t cols = 0;
     fpos_t data_pos = 0;
@@ -56,7 +53,7 @@ struct csv *csv_read(const char * const filename, const bool header, int *error)
     
     //fetch array dimensions
     status = csv_dims(csvfile, header, &rows, &cols);
-    if (status != SUCCESS) STOP(error, status, fail);
+    if (status != CSV_SUCCESS) STOP(error, status, fail);
     
     //configure struct csv
     struct csv *csv = malloc(sizeof(struct csv));
@@ -71,12 +68,12 @@ struct csv *csv_read(const char * const filename, const bool header, int *error)
     else
     {       
         status = csv_get_header(csv, csvfile, &data_pos);
-        if (status != SUCCESS) STOP(error, status, fail);
+        if (status != CSV_SUCCESS) STOP(error, status, fail);
     }
     
     //read each datum into a 2D array of strings (3D ragged array)    
     status = csv_get_data(csv, csvfile, data_pos);
-    if (status != SUCCESS) STOP(error, status, fail);
+    if (status != CSV_SUCCESS) STOP(error, status, fail);
     
     //sanity checks
     if (csv->total <= csv->missing) STOP(error, CSV_UNKNOWN_FATAL_ERROR, fail);
@@ -85,7 +82,7 @@ struct csv *csv_read(const char * const filename, const bool header, int *error)
     //error handling
     success:
         fclose(csvfile);
-        if (error != NULL) *error = CSV_PARSE_SUCCESSFUL;
+        if (error != NULL) *error = CSV_SUCCESS;
         return csv;
         
     fail:
@@ -102,17 +99,17 @@ is excluding the header. Full RFC 4180 compliance means that we can bypass a few
 error handling routines.
 */
 
-static int csv_dims(FILE * const csvfile, bool header, uint32_t *r, uint32_t *c)
+static csv_errno csv_dims(FILE * const csvfile, bool header, uint32_t *r, uint32_t *c)
 {
-    int status = UNDEFINED;
+    csv_errno status = CSV_UNDEFINED;
     
     status = csv_cols(csvfile, c);
     
-    if (status != SUCCESS) return status;
+    if (status != CSV_SUCCESS) return status;
     
     status = csv_rows(csvfile, r);
     
-    if (status == SUCCESS)
+    if (status == CSV_SUCCESS)
     {
         if (header == true) (*r)--;
         rewind(csvfile);
@@ -128,7 +125,7 @@ quotes, RFC 4180 rule 7 implies all quotes always come in pairs, so we consume
 two quotes at a time without risk, even when they are not the correct pairing.
 */
 
-static int csv_cols(FILE * const csvfile, uint32_t *cols)
+static csv_errno csv_cols(FILE * const csvfile, uint32_t *cols)
 {
     int c = 0;
     *cols = 1;
@@ -145,7 +142,7 @@ static int csv_cols(FILE * const csvfile, uint32_t *cols)
                 break;
             
             case '\n':
-                return SUCCESS;
+                return CSV_SUCCESS;
             
             //double quotes -> consume everything until enclosing quote
             //RFC 4180 rule 7 implies quotes incl. escapes always come in pairs
@@ -163,7 +160,7 @@ static int csv_cols(FILE * const csvfile, uint32_t *cols)
         }
     }
     
-    return SUCCESS;
+    return CSV_SUCCESS;
 }
 
 
@@ -173,7 +170,7 @@ double responsibility so the manager will handle the logic to exclude the header
 from the total count.
 */
 
-static int csv_rows(FILE * const csvfile, uint32_t *rows)
+static csv_errno csv_rows(FILE * const csvfile, uint32_t *rows)
 {
     int c = 0;
     *rows = 0;
@@ -218,7 +215,7 @@ static int csv_rows(FILE * const csvfile, uint32_t *rows)
         (*rows)++;
         if (*rows == 0) return CSV_NUM_ROWS_OVERFLOW;
     
-    return SUCCESS;
+    return CSV_SUCCESS;
 }
 
 
@@ -228,7 +225,7 @@ the target buffer as a nul-terminated string. EOF condition is not used in the
 header processing. Enclosing quotes and escape sequence quotes are removed.
 */
 
-static int csv_tokenize(FILE * const csvfile, char *buffer, int n)
+static csv_errno csv_tokenize(FILE * const csvfile, char *buffer, int n)
 {
     int lag = 0;
     int lead = 0;
@@ -255,7 +252,7 @@ static int csv_tokenize(FILE * const csvfile, char *buffer, int n)
     
     buffer[i] = '\0';
     
-    return SUCCESS;
+    return CSV_SUCCESS;
 }
 
 
@@ -265,9 +262,9 @@ names and assign to struct csv metadata. By RFC 4180 rule 3, the header has the
 same format as the records. Note the file position as the start of the data.
 */
 
-static int csv_get_header(struct csv *csv, FILE * const csvfile, fpos_t *pos)
+static csv_errno csv_get_header(struct csv *csv, FILE * const csvfile, fpos_t *pos)
 {
-    int status = UNDEFINED;
+    csv_errno status = CSV_UNDEFINED;
     
     rewind(csvfile);
     
@@ -283,7 +280,7 @@ static int csv_get_header(struct csv *csv, FILE * const csvfile, fpos_t *pos)
     {
         //load temp buffer with next field
         status = csv_tokenize(csvfile, tmp, CSV_TEMPORARY_BUFFER_LENGTH);
-        if (status != SUCCESS) return status;
+        if (status != CSV_SUCCESS) return status;
         
         //copy temp to size-appropriate block and save
         csv->header[i] = malloc(strlen(tmp) + 1);
@@ -294,7 +291,7 @@ static int csv_get_header(struct csv *csv, FILE * const csvfile, fpos_t *pos)
     free(tmp);
     fgetpos(csvfile, pos);
     
-    return SUCCESS;    
+    return CSV_SUCCESS;    
 }
 
 
@@ -305,9 +302,9 @@ to data. Missing fields are allocated as the nul character, rather than being
 set as a null pointer. In practice this has made working with the data easier.
 */
 
-static int csv_get_data(struct csv *csv, FILE * const csvfile, fpos_t data_pos)
+static csv_errno csv_get_data(struct csv *csv, FILE * const csvfile, fpos_t data_pos)
 {
-    int status = UNDEFINED;
+    csv_errno status = CSV_UNDEFINED;
     csv->missing = 0;
     
     fsetpos(csvfile, &data_pos);
@@ -332,7 +329,7 @@ static int csv_get_data(struct csv *csv, FILE * const csvfile, fpos_t data_pos)
         {
             //load temp buffer with next field
             status = csv_tokenize(csvfile, tmp, CSV_TEMPORARY_BUFFER_LENGTH);
-            if (status != SUCCESS) return status;
+            if (status != CSV_SUCCESS) return status;
             
             //load csv cell
             if (tmp[0] == '\0') csv->missing++;
@@ -385,7 +382,7 @@ Attempt to convert a row of data to an array of longs. Assumes that data is not
 missing.
 */
 
-long *csv_rowl(struct csv *csv, const uint32_t i, const int base, int *error)
+long *csv_rowl(struct csv *csv, const uint32_t i, const int base, csv_errno *error)
 {
     if (csv == NULL) STOP(error, CSV_NULL_INPUT_POINTER, early_stop);
     if (i >= csv->rows) STOP(error, CSV_PARAM_OUT_OF_BOUNDS, early_stop);
@@ -421,7 +418,7 @@ long *csv_rowl(struct csv *csv, const uint32_t i, const int base, int *error)
         data[j] = tmp;
     }
     
-    if (error != NULL) *error = CSV_PARSE_SUCCESSFUL;
+    if (error != NULL) *error = CSV_SUCCESS;
     return data;
     
     fail:
@@ -436,7 +433,7 @@ long *csv_rowl(struct csv *csv, const uint32_t i, const int base, int *error)
 Missing values lead to error rather than copying the nul-char as the target.
 */
 
-char *csv_rowc(struct csv *csv, const uint32_t i, int *error)
+char *csv_rowc(struct csv *csv, const uint32_t i, csv_errno *error)
 {
     if (csv == NULL) STOP(error, CSV_NULL_INPUT_POINTER, early_stop);
     if (i >= csv->rows) STOP(error, CSV_PARAM_OUT_OF_BOUNDS, early_stop);
@@ -458,7 +455,7 @@ char *csv_rowc(struct csv *csv, const uint32_t i, int *error)
         }
     }
     
-    if (error != NULL) *error = CSV_PARSE_SUCCESSFUL;
+    if (error != NULL) *error = CSV_SUCCESS;
     return data;
     
     fail:
@@ -474,7 +471,7 @@ Attempt to convert a column of data to an array of longs. Assumes that data is
 not missing. Will likely be slower than csv_rowl due to cache thrashing.
 */
 
-long *csv_coll(struct csv *csv, const uint32_t j, const int base, int *error)
+long *csv_coll(struct csv *csv, const uint32_t j, const int base, csv_errno *error)
 {
     if (csv == NULL) STOP(error, CSV_NULL_INPUT_POINTER, early_stop);
     if (j >= csv->cols) STOP(error, CSV_PARAM_OUT_OF_BOUNDS, early_stop);
@@ -510,7 +507,7 @@ long *csv_coll(struct csv *csv, const uint32_t j, const int base, int *error)
         data[i] = tmp;
     }
     
-    if (error != NULL) *error = CSV_PARSE_SUCCESSFUL;
+    if (error != NULL) *error = CSV_SUCCESS;
     return data;
     
     fail:
@@ -525,7 +522,7 @@ long *csv_coll(struct csv *csv, const uint32_t j, const int base, int *error)
 Missing values lead to error rather than copying the nul-char as the target.
 */
 
-char *csv_colc(struct csv *csv, const uint32_t j, int *error)
+char *csv_colc(struct csv *csv, const uint32_t j, csv_errno *error)
 {
     if (csv == NULL) STOP(error, CSV_NULL_INPUT_POINTER, early_stop);
     if (j >= csv->rows) STOP(error, CSV_PARAM_OUT_OF_BOUNDS, early_stop);
@@ -547,7 +544,7 @@ char *csv_colc(struct csv *csv, const uint32_t j, int *error)
         }
     }
     
-    if (error != NULL) *error = CSV_PARSE_SUCCESSFUL;
+    if (error != NULL) *error = CSV_SUCCESS;
     return data;
     
     fail:
@@ -556,4 +553,54 @@ char *csv_colc(struct csv *csv, const uint32_t j, int *error)
     
     early_stop:
         return NULL;
+}
+
+
+/******************************************************************************/
+
+const char *csv_errno_decode(const csv_errno error)
+{
+    switch (error)
+    {
+        case CSV_SUCCESS:
+            return "successful API call.\n";
+        case CSV_NULL_FILENAME:
+            return "the provide filename pointer is null.\n";
+        case CSV_INVALID_FILE:
+            return "the provided filename is invalid.\n";
+        case CSV_NUM_COLUMNS_OVERFLOW:
+            return "the number of columns in the file exceeds UINT32_MAX.\n";
+        case CSV_NUM_ROWS_OVERFLOW:
+            return "the number of rows in the file exceeds UINT32_MAX.\n";
+        case CSV_FIELD_LEN_OVERFLOW:
+            return "attempted to parse a field that exceeds UINT32_MAX chars.\n";
+        case CSV_BUFFER_OVERFLOW:
+            return "the temporary buffer is not large enough to hold some field.\n";
+        case CSV_MALLOC_FAILED:
+            return "attempted stdlib malloc call has failed.\n";
+        case CSV_FATAL_UNGETC:
+            return "attempted stdio ungetc call has failed.\n";
+        case CSV_NULL_INPUT_POINTER:
+            return "provided input pointer is invalid.\n";
+        case CSV_PARAM_OUT_OF_BOUNDS:
+            return "provided input argument to function call is too large.\n";
+        case CSV_UNKNOWN_FATAL_ERROR:
+            return "fatal bug in csv.c has occured.\n";
+        case CSV_READ_FAIL:
+            return "field cannot be converted to requested type.\n";
+        case CSV_READ_OVERFLOW:
+            return "field is too large, errno.h errno is set to ERANGE.\n";
+        case CSV_READ_UNDERFLOW:
+            return "field is too small, errno.h errno is set to ERANGE.\n";
+        case CSV_READ_PARTIAL:
+            return "field was partially read during type conversion.\n";
+        case CSV_INVALID_BASE:
+            return "conversion to integer type failed, check base argument.\n";
+        case CSV_MISSING_DATA:
+            return "attempted to convert data at field, but none exists.\n";
+        case CSV_UNDEFINED:
+            return "an error code has not been set.\ns";
+    }
+    
+    return "an unknown error code has been received.\n";
 }

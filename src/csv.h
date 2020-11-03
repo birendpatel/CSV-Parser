@@ -15,16 +15,19 @@
 * DESC: implementation uses by default a 1 KiB buffer to process each csv cell. 
 * NOTE: temporary buffers are allocated on the heap
 * NOTE: can be modified to any positive value depending on the expected types
+* NOTE: overflow during csv processing wil result in CSV_BUFFER_OVERFLOW error
 *******************************************************************************/
 #define CSV_TEMPORARY_BUFFER_LENGTH 1024
 
 /*******************************************************************************
-* NAME: csv_error_code
-* DESC: all possible error codes that may be returned by any function
+* NAME: csv_error_t
+* DESC: API error codes
+* NOTE: use CSV_UNDEFINED to silence -Wuninitialized
+* NOTE: use decode function for explicit error details
 *******************************************************************************/
-enum csv_error_code
+typedef enum
 {
-    CSV_PARSE_SUCCESSFUL        = 0,
+    CSV_SUCCESS                 = 0,
     CSV_NULL_FILENAME           = 1,
     CSV_INVALID_FILE            = 2,
     CSV_NUM_COLUMNS_OVERFLOW    = 3,
@@ -42,7 +45,10 @@ enum csv_error_code
     CSV_READ_PARTIAL            = 15,
     CSV_INVALID_BASE            = 16,
     CSV_MISSING_DATA            = 17,
-};
+    CSV_UNDEFINED               = 999
+} csv_errno;
+
+const char *csv_errno_decode(const csv_errno error);
 
 /*******************************************************************************
 * NAME: struct csv
@@ -72,7 +78,7 @@ struct csv
 * @ header : true if first row of csv file contains column headers
 * @ error : contains error code on return if not null
 *******************************************************************************/
-struct csv *csv_read(const char * const filename, const bool header, int *error);
+struct csv *csv_read(const char * const filename, const bool header, csv_errno *error);
 
 /*******************************************************************************
 * NAME: csv_free
@@ -88,8 +94,8 @@ void csv_free(struct csv *csv);
 * NOTE: user responsibility to free returned array
 * @ error : contains error code on return if not null
 *******************************************************************************/
-long *csv_rowl(struct csv *csv, const uint32_t i, const int base, int *error);
-char *csv_rowc(struct csv *csv, const uint32_t i, int *error);
+long *csv_rowl(struct csv *csv, const uint32_t i, const int base, csv_errno *error);
+char *csv_rowc(struct csv *csv, const uint32_t i, csv_errno *error);
 
 /*******************************************************************************
 * NAME: csv_col[*]
@@ -98,7 +104,7 @@ char *csv_rowc(struct csv *csv, const uint32_t i, int *error);
 * NOTE: user responsibility to free returned array
 * @ error : contains error code on return if not null
 *******************************************************************************/
-long *csv_coll(struct csv *csv, const uint32_t j, const int base, int *error);
-char *csv_colc(struct csv *csv, const uint32_t j, int *error);
+long *csv_coll(struct csv *csv, const uint32_t j, const int base, csv_errno *error);
+char *csv_colc(struct csv *csv, const uint32_t j, csv_errno *error);
 
 #endif
