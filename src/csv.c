@@ -300,9 +300,9 @@ static int csv_get_header(struct csv *csv, FILE * const csvfile, fpos_t *pos)
 
 /*******************************************************************************
 Load flexible array of struct csv with all of the file contents. Read a field
-one by one into a temporary buffer. Analyze the field to infer its type. Then
-perform some extra analysis if required to set columns to homogenous types using
-sampling and frequency lists.
+one by one into a temporary buffer and copy the minimal amount of memory space
+to data. Missing fields are allocated as the nul character, rather than being
+set as a null pointer. In practice this has made working with the data easier.
 */
 
 static int csv_get_data(struct csv *csv, FILE * const csvfile, fpos_t data_pos)
@@ -335,17 +335,11 @@ static int csv_get_data(struct csv *csv, FILE * const csvfile, fpos_t data_pos)
             if (status != SUCCESS) return status;
             
             //load csv cell
-            if (tmp[0] == '\0')
-            {
-                csv->data[i][j] = NULL;
-                csv->missing++;
-            }
-            else
-            {
-                csv->data[i][j] = malloc(strlen(tmp) + 1);
-                if (csv->data[i][j] == NULL) return CSV_MALLOC_FAILED;
-                strncpy(csv->data[i][j], tmp, strlen(tmp) + 1);
-            }
+            if (tmp[0] == '\0') csv->missing++;
+            
+            csv->data[i][j] = malloc(strlen(tmp) + 1);
+            if (csv->data[i][j] == NULL) return CSV_MALLOC_FAILED;
+            strncpy(csv->data[i][j], tmp, strlen(tmp) + 1);
         }
     }
     
