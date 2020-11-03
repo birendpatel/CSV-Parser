@@ -387,15 +387,16 @@ void csv_free(struct csv *csv)
 
 
 /*******************************************************************************
-
+Attempt to convert a row of data to an array of longs. Assumes that data is not
+missing.
 */
 
-long *csv_row_as_long(struct csv *csv, const uint32_t i, int *error)
+long *csv_rowl(struct csv *csv, const uint32_t i, const int base, int *error)
 {
     if (csv == NULL) STOP(error, CSV_NULL_INPUT_POINTER, early_stop);
     if (i >= csv->rows) STOP(error, CSV_PARAM_OUT_OF_BOUNDS, early_stop);
     
-    long *data = malloc(sizeof(int) * csv->cols);
+    long *data = malloc(sizeof(long) * csv->cols);
     if (data == NULL) STOP(error, CSV_MALLOC_FAILED, early_stop);
 
     for (uint32_t j = 0; j < csv->cols; j++)
@@ -404,22 +405,152 @@ long *csv_row_as_long(struct csv *csv, const uint32_t i, int *error)
         long tmp = 0;
         char *end = NULL;
         
-        tmp = strtol(csv->data[i][j], &end, 10);
+        if (csv->data[i][j][0] == '\0') STOP(error, CSV_MISSING_DATA, fail);
+        else tmp = strtol(csv->data[i][j], &end, base);
         
         //parse error handling
-        if (csv->data[i][j] == end) 
+        if (end == csv->data[i][j]) 
             STOP(error, CSV_READ_FAIL, fail);
         if (errno == ERANGE && tmp == LONG_MIN)
             STOP(error, CSV_READ_UNDERFLOW, fail);
         if (errno == ERANGE && tmp == LONG_MAX)
             STOP(error, CSV_READ_OVERFLOW, fail);
+        if (errno == EINVAL)
+            STOP(error, CSV_INVALID_BASE, fail);
         if (errno == 0 && *end != '\0')
             STOP(error, CSV_READ_PARTIAL, fail);
         if (errno != 0)
             STOP(error, CSV_UNKNOWN_FATAL_ERROR, fail);
         
         //success
+        assert(*end == '\0' && "missing condition");
         data[j] = tmp;
+    }
+    
+    if (error != NULL) *error = CSV_PARSE_SUCCESSFUL;
+    return data;
+    
+    fail:
+        free(data);
+        return NULL;
+    
+    early_stop:
+        return NULL;
+}
+
+/*******************************************************************************
+Missing values lead to error rather than copying the nul-char as the target.
+*/
+
+char *csv_rowc(struct csv *csv, const uint32_t i, int *error)
+{
+    if (csv == NULL) STOP(error, CSV_NULL_INPUT_POINTER, early_stop);
+    if (i >= csv->rows) STOP(error, CSV_PARAM_OUT_OF_BOUNDS, early_stop);
+    
+    char *data = malloc(sizeof(char) * csv->cols);
+    if (data == NULL) STOP(error, CSV_MALLOC_FAILED, early_stop);
+    
+    for (uint32_t j = 0; j < csv->cols; j++)
+    {
+        char tmp = csv->data[i][j][0];
+        
+        if (tmp == '\0')
+        {
+            STOP(error, CSV_MISSING_DATA, fail);
+        }
+        else
+        {
+            data[j] = tmp;
+        }
+    }
+    
+    if (error != NULL) *error = CSV_PARSE_SUCCESSFUL;
+    return data;
+    
+    fail:
+        free(data);
+        return NULL;
+    
+    early_stop:
+        return NULL;
+}
+
+/*******************************************************************************
+Attempt to convert a column of data to an array of longs. Assumes that data is
+not missing. Will likely be slower than csv_rowl due to cache thrashing.
+*/
+
+long *csv_coll(struct csv *csv, const uint32_t j, const int base, int *error)
+{
+    if (csv == NULL) STOP(error, CSV_NULL_INPUT_POINTER, early_stop);
+    if (j >= csv->cols) STOP(error, CSV_PARAM_OUT_OF_BOUNDS, early_stop);
+    
+    long *data = malloc(sizeof(long) * csv->rows);
+    if (data == NULL) STOP(error, CSV_MALLOC_FAILED, early_stop);
+
+    for (uint32_t i = 0; i < csv->rows; i++)
+    {
+        errno = 0;
+        long tmp = 0;
+        char *end = NULL;
+        
+        if (csv->data[i][j][0] == '\0') STOP(error, CSV_MISSING_DATA, fail);
+        else tmp = strtol(csv->data[i][j], &end, base);
+        
+        //parse error handling
+        if (end == csv->data[i][j]) 
+            STOP(error, CSV_READ_FAIL, fail);
+        if (errno == ERANGE && tmp == LONG_MIN)
+            STOP(error, CSV_READ_UNDERFLOW, fail);
+        if (errno == ERANGE && tmp == LONG_MAX)
+            STOP(error, CSV_READ_OVERFLOW, fail);
+        if (errno == EINVAL)
+            STOP(error, CSV_INVALID_BASE, fail);
+        if (errno == 0 && *end != '\0')
+            STOP(error, CSV_READ_PARTIAL, fail);
+        if (errno != 0)
+            STOP(error, CSV_UNKNOWN_FATAL_ERROR, fail);
+        
+        //success
+        assert(*end == '\0' && "missing condition");
+        data[i] = tmp;
+    }
+    
+    if (error != NULL) *error = CSV_PARSE_SUCCESSFUL;
+    return data;
+    
+    fail:
+        free(data);
+        return NULL;
+    
+    early_stop:
+        return NULL;
+}
+
+/*******************************************************************************
+Missing values lead to error rather than copying the nul-char as the target.
+*/
+
+char *csv_colc(struct csv *csv, const uint32_t j, int *error)
+{
+    if (csv == NULL) STOP(error, CSV_NULL_INPUT_POINTER, early_stop);
+    if (j >= csv->rows) STOP(error, CSV_PARAM_OUT_OF_BOUNDS, early_stop);
+    
+    char *data = malloc(sizeof(char) * csv->rows);
+    if (data == NULL) STOP(error, CSV_MALLOC_FAILED, early_stop);
+    
+    for (uint32_t i = 0; i < csv->rows; i++)
+    {
+        char tmp = csv->data[i][j][0];
+        
+        if (tmp == '\0')
+        {
+            STOP(error, CSV_MISSING_DATA, fail);
+        }
+        else
+        {
+            data[i] = tmp;
+        }
     }
     
     if (error != NULL) *error = CSV_PARSE_SUCCESSFUL;

@@ -40,6 +40,8 @@ enum csv_error_code
     CSV_READ_OVERFLOW           = 13,
     CSV_READ_UNDERFLOW          = 14,
     CSV_READ_PARTIAL            = 15,
+    CSV_INVALID_BASE            = 16,
+    CSV_MISSING_DATA            = 17,
 };
 
 /*******************************************************************************
@@ -80,12 +82,23 @@ struct csv *csv_read(const char * const filename, const bool header, int *error)
 void csv_free(struct csv *csv);
 
 /*******************************************************************************
-* NAME: csv_row_as_*
+* NAME: csv_row[*]
 * DESC: return row i as a dynamically allocated array of the wildcard type
 * OUTP: null if failure to transform any cell to the requested type
 * NOTE: user responsibility to free returned array
 * @ error : contains error code on return if not null
 *******************************************************************************/
-long *csv_row_as_long(struct csv *csv, const uint32_t i, int *error);
+long *csv_rowl(struct csv *csv, const uint32_t i, const int base, int *error);
+char *csv_rowc(struct csv *csv, const uint32_t i, int *error);
+
+/*******************************************************************************
+* NAME: csv_col[*]
+* DESC: return col j as a dynamically allocated array of the wildcard type
+* OUTP: null if failure to transform any cell to the requested type
+* NOTE: user responsibility to free returned array
+* @ error : contains error code on return if not null
+*******************************************************************************/
+long *csv_coll(struct csv *csv, const uint32_t j, const int base, int *error);
+char *csv_colc(struct csv *csv, const uint32_t j, int *error);
 
 #endif
