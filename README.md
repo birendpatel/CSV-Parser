@@ -1,8 +1,8 @@
 # CSV Parser
 
-RFC 4180 Compliant CSV parser for C applications. The API in src/csv.h contains the documentation.
+RFC 4180 Compliant CSV parser for C applications. The API in src/csv.h contains the full documentation.
 
-# Demo
+## Demo
 
 ```C
 #include <stdio.h>
@@ -44,7 +44,7 @@ int main(void)
     free(data_in_first_row);
     free(data_in_final_column);
     
-    //struct csv allocates a great deal of memory. Dont forget to free it!
+    //csv_read() allocates a great deal of memory. Dont forget to free it!
     csv_free(csv);
     
     return EXIT_SUCCESS;
