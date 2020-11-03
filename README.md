@@ -1,6 +1,6 @@
 # CSV Parser
 
-RFC 4180 Compliant CSV parser for C applications. The API in src/csv.h contains the full documentation.
+RFC 4180 compliant CSV parser for C99+ applications. The API in src/csv.h contains the full documentation. This parser trades off computational and memory efficiency in favor of simplicity and ease-of-use. The csv data is held in memory as a 3D ragged array of strings. For some problem domains, such as data analytics where columnar data slicing is frequently performed, a great deal of cache trashing will occur but for prototyping, sketches, and small/medium dataset processing this should do the job.
 
 ## Demo
 
@@ -11,16 +11,16 @@ RFC 4180 Compliant CSV parser for C applications. The API in src/csv.h contains 
 
 int main(void)
 {
-    //error handle uses enum csv_errno from csv.h
+    //optional error handle used by all API functions
     csv_errno error = CSV_UNDEFINED;
     
-    //read the contents of a RFC 4180 compliant file into memory.
+    //read the contents of a RFC 4180 compliant file into memory
     struct csv *csv = csv_read("data.csv", true, &error);
     
-    //all API functions return CSV_SUCCESS on success
+    //all API functions set error to CSV_SUCCESS (zero) on success
     if (error != CSV_SUCCESS) fprintf(stderr, "%s", csv_errno_decode(error));
     
-    //the struct is transparent so you can access the header and field metadata
+    //access the header and field metadata through the transparent struct
     for (size_t i = 0; i < csv->cols; i++) puts(csv->headers[i]);
     printf("total missing fields: %d\n", csv->missing);
     printf("total rows: %d\n", csv->rows);
@@ -31,7 +31,7 @@ int main(void)
     puts(csv->data[0][0]);
     puts(csv->data[csv->rows - 1][csv->cols - 1]);
     
-    //but you can copy rows or columns of homogenous data to the type you need.
+    //you can copy rows or columns of homogenous data to the type you need.
     //for example, pack a row of long int values into a standard C array
     long *data_in_first_row = csv_rowl(csv, 0, 10, &error);
     if (error != CSV_SUCCESS) fprintf(stderr, "%s", csv_errno_decode(error));
@@ -44,7 +44,7 @@ int main(void)
     free(data_in_first_row);
     free(data_in_final_column);
     
-    //csv_read() allocates a great deal of memory. Dont forget to free it!
+    //csv_read() allocates quite a bit of memory. Dont forget to free it!
     csv_free(csv);
     
     return EXIT_SUCCESS;
